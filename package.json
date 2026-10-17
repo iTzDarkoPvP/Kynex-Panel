@@ -1,0 +1,42 @@
+{
+  "dependencies": {
+    "child_process": "^1.0.2",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.6",
+    "crypto": "^1.0.1",
+    "express": "^5.2.1",
+    "express-async-errors": "^3.1.1",
+    "express-rate-limit": "^8.6.2",
+    "fs": "^0.0.1-security",
+    "geoip-lite": "^2.0.3",
+    "http": "^0.0.1-security",
+    "multer": "^2.2.0",
+    "node-cron": "^4.6.0",
+    "node-pty": "^1.1.0",
+    "nodemailer": "^10.0.10",
+    "os": "^0.1.2",
+    "path": "^0.12.7",
+    "pm2": "^7.0.3",
+    "speakeasy": "^2.0.0",
+    "useragent": "^2.3.0",
+    "ws": "^8.21.3"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "name": "kynex-panel",
+  "version": "1.0.0",
+  "main": "server.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/iTzDarkoPvP/Traslado.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/iTzDarkoPvP/Traslado/issues"
+  },
+  "homepage": "https://github.com/iTzDarkoPvP/Traslado#readme",
+  "description": ""
+}
