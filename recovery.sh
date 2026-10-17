@@ -1,19 +1,4 @@
 #!/usr/bin/env bash
-# ==============================================================================
-#  Kynex Panel · Configurar correo (recuperación de contraseña)
-#
-#  Uso:   sudo bash recovery.sh
-#
-#  Sirve para configurar (o cambiar, o quitar) el correo SMTP del panel cuando
-#  en install.sh respondiste "n". No reinstala nada: solo edita
-#  ecosystem.config.js y reinicia el panel con PM2.
-#
-#  Modo automático (sin preguntas):
-#    KYNEX_SMTP_HOST=smtp.gmail.com KYNEX_SMTP_PORT=587 KYNEX_SMTP_USER=tu@gmail.com \
-#    KYNEX_SMTP_PASS='clave-de-aplicacion' sudo -E bash recovery.sh
-#  Para quitar el correo:  KYNEX_SMTP_REMOVE=y sudo -E bash recovery.sh
-#  Variables: KYNEX_SMTP_HOST/PORT/USER/PASS/FROM  INSTALL_DIR
-# ==============================================================================
 set -Eeuo pipefail
 
 APP_NAME="kynex-panel"
@@ -35,7 +20,7 @@ die()  { printf '\n  %s✘ %s%s\n\n' "$C_RED" "$*" "$C_OFF" >&2; exit 1; }
 
 have_tty() { [ -r /dev/tty ] && [ -w /dev/tty ] && : </dev/tty 2>/dev/null; }
 
-ask() { # ask VAR "Pregunta" "defecto"
+ask() {
   local __v="$1" __q="$2" __d="${3:-}" __in=""
   if [ -n "${!__v:-}" ]; then return 0; fi
   if ! have_tty; then printf -v "$__v" '%s' "$__d"; return 0; fi
@@ -43,7 +28,7 @@ ask() { # ask VAR "Pregunta" "defecto"
   printf -v "$__v" '%s' "${__in:-$__d}"
 }
 
-ask_yn() { # ask_yn VAR "Pregunta" y|n
+ask_yn() {
   local __v="$1" __q="$2" __d="${3:-n}" __in="" __hint
   if [ "$__d" = "y" ]; then __hint="Y/n"; else __hint="y/N"; fi
   if [ -n "${!__v:-}" ]; then
@@ -64,7 +49,6 @@ ask_yn() { # ask_yn VAR "Pregunta" y|n
 
 valid_port() { [[ "$1" =~ ^[0-9]{1,5}$ ]] && [ "$1" -ge 1 ] && [ "$1" -le 65535 ]; }
 
-# ------------------------------------------------------------------ checks ---
 if [ "${EUID:-$(id -u)}" -ne 0 ]; then
   if command -v sudo >/dev/null 2>&1; then
     exec sudo -E bash "$0" "$@"
@@ -82,36 +66,69 @@ say ""
 
 command -v node >/dev/null 2>&1 || die "No encuentro Node.js. ¿Ya ejecutaste install.sh?"
 command -v pm2  >/dev/null 2>&1 || die "No encuentro PM2. ¿Ya ejecutaste install.sh?"
-[ -f "$ECO" ] || die "No existe $ECO. Ejecuta primero install.sh (o usa INSTALL_DIR=/ruta)."
 
-# ------------------------------------------------------------ quitar correo ---
-KYNEX_SMTP_REMOVE="${KYNEX_SMTP_REMOVE:-}"
-if [ -z "$KYNEX_SMTP_REMOVE" ] && have_tty && [ -z "${KYNEX_SMTP_HOST:-}" ]; then
+ECO_EXISTS=0
+HAS_SMTP=0
+if [ -f "$ECO" ]; then
+  ECO_EXISTS=1
   if node -e 'const c=require(process.argv[1]);process.exit(c.apps[0].env.SMTP_HOST?0:1)' "$ECO" 2>/dev/null; then
-    warn "Ya hay un correo configurado."
-    ask_yn KYNEX_SMTP_REMOVE "¿Quieres QUITARLO en vez de cambiarlo?" n
+    HAS_SMTP=1
   fi
 fi
 
-write_eco() { # write_eco "modo" (set|remove)
-  E_MODE="$1" E_FILE="$ECO" \
+KYNEX_SMTP_REMOVE="${KYNEX_SMTP_REMOVE:-}"
+if [ -z "$KYNEX_SMTP_REMOVE" ] && have_tty && [ "$HAS_SMTP" = "1" ] && [ -z "${KYNEX_SMTP_HOST:-}" ]; then
+  warn "Ya hay un correo configurado."
+  ask_yn KYNEX_SMTP_REMOVE "¿Quieres QUITARLO en vez de cambiarlo?" n
+fi
+
+if [ "$ECO_EXISTS" = "0" ] || [ "$KYNEX_SMTP_REMOVE" != "y" ]; then
+  if [ -z "${PANEL_PORT:-}" ]; then
+    ask PANEL_PORT "Puerto HTTP del panel" "3000"
+  fi
+  if [ -z "${PANEL_SSL_PORT:-}" ]; then
+    ask PANEL_SSL_PORT "Puerto HTTPS del panel" "443"
+  fi
+  if [ -z "${PANEL_PUBLIC_URL:-}" ]; then
+    ask PANEL_PUBLIC_URL "URL pública del panel (vacío = auto)" ""
+  fi
+fi
+
+write_eco() {
+  local mode="$1"
+  E_MODE="$mode" E_FILE="$ECO" \
   E_HOST="${KYNEX_SMTP_HOST:-}" E_PORT="${KYNEX_SMTP_PORT:-587}" E_USER="${KYNEX_SMTP_USER:-}" \
   E_PASS="${KYNEX_SMTP_PASS:-}" E_FROM="${KYNEX_SMTP_FROM:-}" \
+  E_NAME="$APP_NAME" E_DIR="$INSTALL_DIR" \
+  E_PPORT="${PANEL_PORT:-3000}" E_SPORT="${PANEL_SSL_PORT:-443}" E_PUB="${PANEL_PUBLIC_URL:-}" \
   node -e '
     const fs=require("fs"),e=process.env;
-    const cfg=require(e.E_FILE);
+    let cfg;
+    if(e.E_MODE==="create"||!fs.existsSync(e.E_FILE)){
+      cfg={apps:[{name:e.E_NAME,script:"server.js",cwd:"__DIRNAME__",autorestart:true,max_restarts:50,min_uptime:"10s",restart_delay:3000,kill_timeout:15000,env:{NODE_ENV:"production",PANEL_PORT:e.E_PPORT,PANEL_SSL_PORT:e.E_SPORT,PANEL_PUBLIC_URL:e.E_PUB}}]};
+    } else {
+      cfg=require(e.E_FILE);
+    }
     const app=cfg.apps[0];
-    const cwd=app.cwd;
+    if(!app.env)app.env={};
+    app.env.NODE_ENV=app.env.NODE_ENV||"production";
+    app.env.PANEL_PORT=e.E_PPORT;
+    app.env.PANEL_SSL_PORT=e.E_SPORT;
+    if(e.E_PUB)app.env.PANEL_PUBLIC_URL=e.E_PUB;
     for(const k of ["SMTP_HOST","SMTP_PORT","SMTP_USER","SMTP_PASS","SMTP_FROM","SMTP_SECURE"])delete app.env[k];
     if(e.E_MODE==="set"){
-      app.env.SMTP_HOST=e.E_HOST;app.env.SMTP_PORT=e.E_PORT;app.env.SMTP_USER=e.E_USER;app.env.SMTP_PASS=e.E_PASS;
+      app.env.SMTP_HOST=e.E_HOST;
+      app.env.SMTP_PORT=e.E_PORT;
+      app.env.SMTP_USER=e.E_USER;
+      app.env.SMTP_PASS=e.E_PASS;
       app.env.SMTP_FROM=e.E_FROM||e.E_USER;
       if(e.E_PORT==="465")app.env.SMTP_SECURE="true";
     }
-    let out="// Generado por install.sh · contiene credenciales: no lo compartas\nmodule.exports = "+JSON.stringify(cfg,null,2)+";\n";
-    out=out.replace(JSON.stringify(cwd),"__dirname");
-    fs.writeFileSync(e.E_FILE+".tmp",out,{mode:0o600});
-    fs.renameSync(e.E_FILE+".tmp",e.E_FILE);
+    let out="module.exports = "+JSON.stringify(cfg,null,2)+";\n";
+    out=out.replace("\"__DIRNAME__\"","__dirname");
+    const tmp=e.E_FILE+".tmp";
+    fs.writeFileSync(tmp,out,{mode:0o600});
+    fs.renameSync(tmp,e.E_FILE);
   ' || die "No se pudo escribir ecosystem.config.js"
   chmod 600 "$ECO"
 }
@@ -135,9 +152,8 @@ if [ "$KYNEX_SMTP_REMOVE" = "y" ]; then
   exit 0
 fi
 
-# ------------------------------------------------------------------ datos ---
 say "  ${C_BLD}Datos del correo (SMTP)${C_OFF}"
-info "Gmail: usa smtp.gmail.com, puerto 587 y una 'contraseña de aplicación' (no tu clave normal)."
+info "Gmail: usa smtp.gmail.com, puerto 587 y una 'contraseña de aplicación'."
 say ""
 ask KYNEX_SMTP_HOST "Servidor SMTP" "smtp.gmail.com"
 while :; do
@@ -157,7 +173,6 @@ if [ -z "${KYNEX_SMTP_HOST:-}" ] || [ -z "${KYNEX_SMTP_USER:-}" ] || [ -z "${KYN
   die "Faltan datos: servidor, usuario y contraseña son obligatorios."
 fi
 
-# ------------------------------------------------------- probar conexión ---
 printf '  %s…%s Probando la conexión con el servidor de correo' "$C_DIM" "$C_OFF"
 TEST_ERR="$(cd "$INSTALL_DIR" && E_HOST="$KYNEX_SMTP_HOST" E_PORT="$KYNEX_SMTP_PORT" E_USER="$KYNEX_SMTP_USER" E_PASS="$KYNEX_SMTP_PASS" node -e '
   const e=process.env;let nm;try{nm=require("nodemailer");}catch(x){console.log("nodemailer no está instalado (ejecuta install.sh de nuevo)");process.exit(2);}
@@ -170,15 +185,19 @@ else
   printf '\r\033[K  %s!%s No se pudo conectar: %s\n' "$C_YLW" "$C_OFF" "$TEST_ERR"
   go="n"
   if have_tty; then ask_yn go "¿Guardar la configuración de todos modos?" n; fi
-  [ "$go" = "y" ] || die "Cancelado. Revisa servidor, puerto, usuario y contraseña, y vuelve a intentarlo."
+  [ "$go" = "y" ] || die "Cancelado. Revisa servidor, puerto, usuario y contraseña."
 fi
 
-# --------------------------------------------------------------- guardar ---
-write_eco set
-ok "Configuración guardada en ecosystem.config.js"
+if [ "$ECO_EXISTS" = "0" ]; then
+  write_eco create
+  ok "ecosystem.config.js creado y SMTP configurado"
+else
+  write_eco set
+  ok "Configuración SMTP guardada en ecosystem.config.js"
+fi
 restart_panel
 
 say ""
-say "  ${C_BLD}${C_GRN}Listo.${C_OFF} Ya puedes usar «¿Olvidaste tu contraseña?» en el login del panel."
-info "Recuerda: cada usuario debe tener un correo guardado en Mi Cuenta para recibir el enlace."
+say "  ${C_BLD}${C_GRN}Listo.${C_OFF} Ya puedes usar «¿Olvidaste tu contraseña?» en el login."
+info "Cada usuario debe tener un correo guardado en Mi Cuenta para recibir el enlace."
 say ""

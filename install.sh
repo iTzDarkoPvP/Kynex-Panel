@@ -1,27 +1,4 @@
 #!/usr/bin/env bash
-# ==============================================================================
-#  Kynex Panel · Instalador automático
-#
-#  Uso:   sudo bash install.sh
-#
-#  Pon este archivo DENTRO de la carpeta del panel (donde están server.js,
-#  index.html, package.json, mailer.js, ddos-blocked.js, etc.) y ejecútalo.
-#
-#  Qué hace:
-#    1. Instala lo necesario (Node.js 20, PM2, compiladores, iptables, zip, ...)
-#    2. Copia el panel a /opt/kynex-panel e instala sus dependencias
-#    3. (Opcional) Saca un certificado SSL gratis con Certbot y lo renueva solo
-#    4. Lo deja corriendo 24/7 con PM2 y arranca solo al reiniciar la VPS
-#    5. Crea tu usuario administrador principal
-#
-#  Sistemas soportados: Ubuntu 20.04+ y Debian 11+ (con root).
-#
-#  Modo automático (sin preguntas), por si lo quieres usar en un script:
-#    KYNEX_USER=admin KYNEX_PASS='MiClaveSegura1' KYNEX_SSL=n sudo -E bash install.sh
-#  Variables: KYNEX_USER KYNEX_PASS KYNEX_EMAIL KYNEX_SSL(y/n) KYNEX_DOMAIN
-#             KYNEX_LE_EMAIL KYNEX_PORT KYNEX_SSL_PORT KYNEX_JAVA(y/n)
-#             KYNEX_SMTP(y/n) KYNEX_SMTP_HOST/PORT/USER/PASS/FROM  INSTALL_DIR
-# ==============================================================================
 set -Eeuo pipefail
 umask 022
 
