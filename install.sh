@@ -342,6 +342,46 @@ get_password() {
 # ------------------------------------------------------------- dependencias ---
 apt_install() { DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -o Dpkg::Options::=--force-confold -o DPkg::Lock::Timeout=300 "$@"; }
 
+install_archive_tools() {
+  step "Herramientas de compresión (zip, rar, 7z, tar, tar.gz, tar.bz2, tar.xz, tar.zst)"
+  local osid=""
+  osid="$(. /etc/os-release 2>/dev/null && printf '%s' "${ID:-}" || true)"
+  if [ "$osid" = "ubuntu" ]; then
+    # unrar y rar viven en el repositorio 'multiverse' de Ubuntu
+    soft "Habilitando repositorio multiverse (necesario para unrar/rar)" bash -c \
+      'DEBIAN_FRONTEND=noninteractive apt-get install -y -qq software-properties-common && add-apt-repository -y multiverse && DEBIAN_FRONTEND=noninteractive apt-get update -qq -o DPkg::Lock::Timeout=300' || true
+  fi
+  run "Compresores base (zip, unzip, tar, gzip, bzip2, xz, zstd, lz4)" \
+    apt_install zip unzip tar gzip bzip2 xz-utils zstd lz4 cpio
+  soft "bsdtar / libarchive (lee .rar, .7z, .zip y .tar.*)" apt_install libarchive-tools || true
+  soft "7-Zip (.7z, .zip, .rar)" apt_install p7zip-full || soft "7-Zip (.7z, .zip, .rar)" apt_install 7zip || true
+  soft "Soporte RAR para 7-Zip" apt_install p7zip-rar || true
+  soft "UnRAR (extraer .rar)" apt_install unrar || soft "UnRAR libre (extraer .rar)" apt_install unrar-free || true
+  soft "RAR (crear .rar)" apt_install rar || true
+  soft "unar (extractor universal)" apt_install unar || true
+
+  local missing="" tool
+  for tool in zip unzip tar gzip bzip2 xz zstd; do
+    command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
+  done
+  if ! command -v 7z >/dev/null 2>&1 && ! command -v 7zz >/dev/null 2>&1 && ! command -v 7za >/dev/null 2>&1; then
+    missing="$missing 7z"
+  fi
+  if [ -z "$missing" ]; then
+    ok "Listos: .zip · .tar · .tar.gz · .tar.bz2 · .tar.xz · .tar.zst · .gz · .bz2 · .xz · .zst · .7z"
+  else
+    warn "No se pudieron instalar:${missing}"
+  fi
+  if command -v unrar >/dev/null 2>&1 || command -v unar >/dev/null 2>&1 || command -v bsdtar >/dev/null 2>&1 || command -v 7z >/dev/null 2>&1; then
+    ok "Archivos .rar: se pueden extraer"
+  else
+    warn "No hay ninguna herramienta para extraer .rar (instala 'unrar' o 'unar' a mano)."
+  fi
+  if ! command -v rar >/dev/null 2>&1; then
+    info "Para CREAR archivos .rar hace falta el paquete 'rar' (no está disponible en este sistema)."
+  fi
+}
+
 install_system_packages() {
   step "Instalando paquetes del sistema"
   export DEBIAN_FRONTEND=noninteractive
@@ -351,6 +391,7 @@ install_system_packages() {
   echo "iptables-persistent iptables-persistent/autosave_v6 boolean true" | debconf-set-selections 2>>"$LOG_FILE" || true
   run "Herramientas base (curl, git, zip, unzip, tar, openssl...)" \
     apt_install ca-certificates curl wget gnupg git zip unzip tar xz-utils openssl lsof procps iproute2 util-linux cron
+  install_archive_tools
   run "Compiladores (necesarios para la consola del panel)" \
     apt_install build-essential python3 python3-pip python3-dev make g++
   run "Firewall (iptables) para la protección anti-DDoS" \
